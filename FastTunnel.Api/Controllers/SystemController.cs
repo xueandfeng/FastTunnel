@@ -53,7 +53,15 @@ public class SystemController : BaseController
         ApiResponse.Data = new
         {
             Count = fastTunnelServer.WebList.Count,
-            Rows = fastTunnelServer.WebList.Select(x => new { x.Key, x.Value.WebConfig.LocalIp, x.Value.WebConfig.LocalPort })
+            Rows = fastTunnelServer.WebList.Select(x => new
+            {
+                x.Key,
+                LocalIp = x.Value.First()?.WebConfig?.LocalIp,
+                LocalPort = x.Value.First()?.WebConfig?.LocalPort,
+                Backends = x.Value.Count,
+                Alive = x.Value.Snapshot().Count(w => w.IsAlive),
+                Degraded = x.Value.Snapshot().Count(w => w.ConsecutiveTimeouts > 0)
+            })
         };
 
         return ApiResponse;

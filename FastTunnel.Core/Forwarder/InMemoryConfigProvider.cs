@@ -7,6 +7,7 @@ using System.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Primitives;
 using Yarp.ReverseProxy.Configuration;
+using Yarp.ReverseProxy.Forwarder;
 using System.Linq;
 
 namespace FastTunnel.Core.Forwarder
@@ -55,7 +56,12 @@ namespace FastTunnel.Core.Forwarder
             oldConfig.SignalChange();
         }
 
-        public void AddWeb(string hostName)
+        /// <summary>
+        /// 为一个站点建路由与集群。
+        /// responseTimeoutSeconds：等内网后台响应的上限（秒），0 = 不覆盖（沿用 YARP 默认 100 秒）。
+        /// 注意集群只在站点首次注册时创建，所以改这个值得重启服务端才会落到已有站点上。
+        /// </summary>
+        public void AddWeb(string hostName, int responseTimeoutSeconds = 0)
         {
             lock (locker)
             {
@@ -80,7 +86,11 @@ namespace FastTunnel.Core.Forwarder
                     Destinations = new Dictionary<string, DestinationConfig>(StringComparer.OrdinalIgnoreCase)
                     {
                          { "default", new DestinationConfig() {Address = $"http://{hostName}",} }
-                    }
+                    },
+                    // 内网后台给出响应头的上限，不覆盖时不写这个字段
+                    HttpRequest = responseTimeoutSeconds > 0
+                        ? new ForwarderRequestConfig { ActivityTimeout = TimeSpan.FromSeconds(responseTimeoutSeconds) }
+                        : null
                 });
 
                 _config = new InMemoryConfig(newRoutes, newClusters);

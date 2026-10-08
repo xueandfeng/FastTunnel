@@ -13,6 +13,14 @@ using System.Threading.Tasks;
 
 namespace FastTunnel.Core.Forwarder
 {
+    /// <summary>
+    /// 把访客请求体与响应体拼成一条双向流的 Stream 包装。
+    /// 当前转发链路用的是 WebSocketStream / ResponseStream，本类型在仓库内没有任何引用点；
+    /// 保留只因为它是 FastTunnel.Core 的公开类型（可能有人嵌用），下个主版本可删除。
+    /// 原文件里有三处无条件 Console.WriteLine（ReadAsync 结束 / Dispose / Close）——
+    /// 那是排障残留：Console 是同步写，一旦被挂上热路径就是每请求几行标准输出，
+    /// 与交付配置把 Yarp.ReverseProxy 降到 Warning 的初衷相反，现已去掉。
+    /// </summary>
     public class TranStream : Stream
     {
         private readonly Stream readStream;
@@ -72,9 +80,7 @@ namespace FastTunnel.Core.Forwarder
 
         public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
-            var len = await this.readStream.ReadAsync(buffer, offset, count, cancellationToken);
-            if (len == 0) { Console.WriteLine("==========ReadAsync END=========="); }
-            return len;
+            return await this.readStream.ReadAsync(buffer, offset, count, cancellationToken);
         }
 
         public override void Write(ReadOnlySpan<byte> buffer)
@@ -90,22 +96,6 @@ namespace FastTunnel.Core.Forwarder
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
             await this.wirteStream.WriteAsync(buffer, cancellationToken);
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            Console.WriteLine("========Dispose=========");
-        }
-
-        public override ValueTask DisposeAsync()
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        public override void Close()
-        {
-            Console.WriteLine("========Close=========");
-            base.Close();
         }
     }
 }

@@ -1,6 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <!-- 与服务端握手时只比主版本（Major）相等，Minor 不把关，所以这不是真正的版本门。
+         而实际发给服务端的版本号来自 FastTunnel.Core.Client 的 Version（见那里的注释），
+         不写这个值只会影响程序集自身显示的版本，不会改变登录行为。
+         升级时三处一起改：FastTunnel.Core、FastTunnel.Core.Client、FastTunnel.Client。 -->
+    <Version>2.3.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -9,9 +14,15 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.8" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
-    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1-dev-02346" />
+    <!-- 生产包不钉预发布版：
+         Serilog.Settings.Configuration 10.0.1-dev-02346 是 dev 构建，GA 10.0.0 已发布；
+         Serilog.Sinks.File 8.0.0-nblumhardt-02322 是维护者分支的临时构建，nuget.org 上
+         并没有 GA 8.0.0，最新稳定版是 7.0.0。本仓库只用到 path / rollingInterval /
+         retainedFileCountLimit / outputTemplate，这些 7.0.0 全都支持（自 5.0 起就有），
+         所以降到 GA。将来真要上游新特性再评估，不要拿 dev 包当交付依赖。 -->
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
-    <PackageReference Include="Serilog.Sinks.File" Version="8.0.0-nblumhardt-02322" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
 
   <ItemGroup>

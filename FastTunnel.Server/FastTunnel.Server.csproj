@@ -13,10 +13,27 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 真实的部署机覆盖配置（含客户端 Token、JWT 签名密钥、管理端口令）不进构建产物。
+         Microsoft.NET.Sdk.Web 默认把 config 下的 *.json 当 Content 拷到 bin/publish，
+         而本文件已在 .gitignore 里，很容易被误认为“不在仓库 = 不在产物”。
+         代价：部署时必须把 config\appsettings.Production.json 手工放到目标目录，
+         与客户端侧 appsettings.Production.json 的做法一致（步骤见部署机留档的上线清单，
+         该文档含真实公网地址与根域，已在 .gitignore 里排除，不入库）。 -->
+    <Content Remove="config\appsettings.Production.json" />
+    <None Remove="config\appsettings.Production.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.8" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
+    <!-- 不要降回 10.0.8：它带进 Microsoft.OpenApi 2.0.0，命中 GHSA-v5pm-xwqc-g5wc
+         （CVE-2026-49451，循环 $ref 递归解析导致进程栈溢出，构建时报 NU1903 高危），
+         2.x 线自 2.7.5 修复，对应到本包是 10.0.11。
+         注：MapOpenApi() 只在 Development 环境挂载，Release 产物里这套依赖不会被路由到，
+         但包体与漏洞面仍在，所以仍要跟着升。 -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.8" />
-    <PackageReference Include="Serilog.AspNetCore" Version="8.0.0" />
+    <!-- 8.0.0 是 .NET 8 代次的包，挂在 net10.0 上属于跨代次凑合用；升到与运行时同代次 -->
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
   </ItemGroup>
  
   <ItemGroup>

@@ -20,10 +20,17 @@ class Program
 {
     public static void Main(string[] args)
     {
+        // 启动引导日志：写进与正式日志同一个 logs/ 目录（容器里该目录建议挂到宿主机），
+        // 这样配置错误、启动即崩溃这类“连不上但没任何日志”的情况也能被留下来。
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
             .Enrich.FromLogContext()
-            .WriteTo.Console().WriteTo.File("Logs/log-.log", rollingInterval: RollingInterval.Day)
+            .WriteTo.Console()
+            .WriteTo.File(
+                "logs/fasttunnel-client-boot-.log",
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 14,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
             .CreateBootstrapLogger();
 
         try
@@ -34,6 +41,11 @@ class Program
         {
             Log.Fatal(ex, "致命异常");
             throw;
+        }
+        finally
+        {
+            // 没有这一句，崩溃前最后一批日志可能还在缓冲区里没落盘
+            Log.CloseAndFlush();
         }
     }
 

@@ -44,6 +44,12 @@ namespace FastTunnel.Core.Forwarder.MiddleWare
             {
                 if (!context.WebSockets.IsWebSocketRequest || !context.Request.Headers.TryGetValue(FastTunnelConst.FASTTUNNEL_VERSION, out var version))
                 {
+                    if (context.WebSockets.IsWebSocketRequest)
+                    {
+                        // 是 WS 握手但缺 FastTunnel 版本头：浏览器页面、探测或其它隧道工具连上 1270 会落到这里
+                        logger.LogWarning($"[Handshake] 收到 WS 握手但缺少 {FastTunnelConst.FASTTUNNEL_VERSION} 头，来向 {context.Connection.RemoteIpAddress}:{context.Connection.RemotePort}，已交给下游处理");
+                    }
+
                     await next();
                     return;
                 };
@@ -67,16 +73,23 @@ namespace FastTunnel.Core.Forwarder.MiddleWare
 
         private async Task handleClient(HttpContext context, string clientVersion)
         {
+            var remote = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort}";
             using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
 
-            if (Version.Parse(clientVersion).Major != serverVersion.Major)
+            logger.LogInformation($"[Handshake] WS 控制通道已建立 {remote} → 本地端口 {context.Connection.LocalPort}，客户端版本 {clientVersion}，服务端版本 {serverVersion}");
+
+            // 用 TryParse 替代 Parse：非 FastTunnel 客户端（扫描器、curl、TLS 探测）发来的
+            // 版本头不再抛 FormatException，而是按版本不兼容正常关闭。
+            if (!Version.TryParse(clientVersion, out var versionInfo) || versionInfo.Major != serverVersion.Major)
             {
+                logger.LogWarning($"[Handshake] 拒绝 {remote}：客户端版本 {clientVersion} 不合法或不匹配服务端 {serverVersion}");
                 await Close(webSocket, $"客户端版本{clientVersion}与服务端版本{serverVersion}不兼容，请升级。");
                 return;
             }
 
             if (!checkToken(context))
             {
+                logger.LogWarning($"[Handshake] 拒绝 {remote}：Token 验证失败（版本 {clientVersion}），请核对两端 Token 配置");
                 await Close(webSocket, "Token验证失败");
                 return;
             }
@@ -85,6 +98,7 @@ namespace FastTunnel.Core.Forwarder.MiddleWare
             var log = loggerFactory.CreateLogger<TunnelClient>();
             var client = new TunnelClient(webSocket, fastTunnelServer, loginHandler, context.Connection.RemoteIpAddress, log);
             client.ConnectionPort = context.Connection.LocalPort;
+            client.RemotePort = context.Connection.RemotePort;
 
             try
             {
@@ -93,7 +107,9 @@ namespace FastTunnel.Core.Forwarder.MiddleWare
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "客户端异常");
+                // 这里只会出现读循环本身的链路异常；固定 Errno 信息已记在会话摘要里，
+                // 只记一条简短警告，避免扫描流量把完整堆栈刷满日志。
+                logger.LogWarning($"[Session {client.SessionId}] 控制通道异常终止：{ex.GetType().Name}: {Abbrev(ex.Message)}");
             }
             finally
             {
@@ -101,11 +117,28 @@ namespace FastTunnel.Core.Forwarder.MiddleWare
             }
         }
 
+        private static string Abbrev(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return "";
+            }
+
+            const int max = 300;
+            return text.Length <= max ? text : text.Substring(0, max) + "...(截断)";
+        }
+
         private static async Task Close(WebSocket webSocket, string reason)
         {
-            await webSocket.SendCmdAsync(MessageType.Log, reason, CancellationToken.None);
-            await webSocket.CloseAsync(WebSocketCloseStatus.Empty, string.Empty, CancellationToken.None);
-            return;
+            try
+            {
+                await webSocket.SendCmdAsync(MessageType.Log, reason, CancellationToken.None);
+                await webSocket.CloseAsync(WebSocketCloseStatus.Empty, string.Empty, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                // 对端可能已经断开，发送/关闭失败不必再抛一层异常刷日志
+            }
         }
 
         private bool checkToken(HttpContext context)

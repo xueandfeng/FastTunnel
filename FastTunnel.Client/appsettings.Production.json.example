@@ -1,0 +1,44 @@
+{
+  // ============================================================================
+  // 客户端（部署机专属）覆盖文件样例。用法：
+  //   1) 复制为同目录的 appsettings.Production.json（跟 appsettings.json 同目录，不放 config/）；
+  //   2) 填本机的服务端地址、Token、内网站点映射；
+  //   3) 重启客户端生效。
+  //
+  // 加载方式：客户端用 Host.CreateDefaultBuilder，默认读工作目录下的
+  // appsettings.json，再读 appsettings.{DOTNET_ENVIRONMENT}.json（默认 Production），
+  // 后者同名键覆盖前者。所以这里只写需要覆盖的项即可。
+  //
+  // ⚠ 真正的 appsettings.Production.json 已被 .gitignore 排除，只应存在于部署机。
+  //   csproj 只把 appsettings.json / appsettings.Development.json 拷进输出目录，本文件不会进产物 ——
+  //   部署时必须手工放到客户端目录（服务端侧现在也是同样的做法，步骤见部署机留档的上线清单，
+  //   该文档含真实公网地址与根域，已在 .gitignore 里排除，不入库）。
+  //   下面的 change-me-xxx 都是占位符：直接拷过去不改，ServerAddr 根本解析不出来，
+  //   客户端只会反复重连失败，不会静默去连仓库里那个公网 IP —— 这是故意的。
+  //
+  // ⚠ 数组是【按下标合并】的，不是整体替换（实测：覆盖文件只写 1 条 Webs，
+  //   而基线有 3 条时，最终注册的是 3 条站点，不是 1 条）。所以本文件的 Webs / Tokens
+  //   要么写全、要么先把基线里对应数组清成 []，否则旧环境的映射会静默残留。
+  // ============================================================================
+  "FastTunnel": {
+    "Server": {
+      // 服务端公网地址（对应服务端 urls 里的 1270 那个监听端口）
+      "ServerAddr": "change-me-server-public-ip-or-domain",
+      "ServerPort": 1270
+    },
+
+    // 必须与服务端 FastTunnel:Tokens 里的某一个完全一致
+    "Token": "change-me-tunnel-token",
+
+    // 内网 web 节点映射：一个站点一条；SubDomain 拼上服务端 WebDomain 形成访问域名，
+    // WWW 里写的则是完整别名域名（需要在服务端 WebDomain 之外单独记一条路由）。
+    "Webs": [
+      {
+        "LocalIp": "change-me-inner-site-ip",
+        "LocalPort": 80,
+        "SubDomain": "www",
+        "WWW": [ "change-me-full-alias-domain" ]
+      }
+    ]
+  }
+}

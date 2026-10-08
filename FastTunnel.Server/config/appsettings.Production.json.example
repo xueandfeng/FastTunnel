@@ -1,0 +1,59 @@
+{
+  // ============================================================================
+  // 部署机专属覆盖文件（样例）。用法：
+  //   1) 复制为同目录的 appsettings.Production.json —— 注意只复制 .example 之外的名字；
+  //   2) 填入本环境的真实域名与凭证；
+  //   3) 重启服务端生效（DefaultServerConfig 只在启动时读取一次）。
+  //
+  // 加载顺序：Program.cs 先读 config/appsettings.json，再读
+  // config/appsettings.{ASPNETCORE_ENVIRONMENT}.json；环境变量默认为 Production，
+  // 所以这个文件会在 appsettings.json 之后合并，同名键以本文件为准。
+  // 只想改几个键就够了，没写的键沿用 appsettings.json。
+  //
+  // ⚠ 真正的 appsettings.Production.json 已被 .gitignore 排除：它只应存在于部署机，
+  //   不要提交。csproj 也已排除它的 Content/None 拷贝，所以它不会进 bin/publish 产物。
+  //
+  // 服务端启动会跑一次凭证自检（StartupSafetyCheck）：appsettings.json 里的占位符
+  // 若没被本文件的真实值覆盖，日志里会出现 [SafetyCheck] WRN 逐条点名。
+  //
+  // ⚠ 数组是【按下标合并】的，不是整体替换（实测：覆盖文件只写 1 条、基线有 3 条时，
+  //   最终生效的是 3 条）。所以 Tokens 要么写全、要么把基线里的 Tokens 清成 []；
+  //   Api:Accounts 同理（只写一个 ops 账号并不会抹掉基线里那个 admin）。
+  //
+  // ⚠ 本文件已被 FastTunnel.Server.csproj 里的 <Content Remove> / <None Remove> 排除，
+  //   不会被拷进 bin\Release\net10.0\config\（以前会，那是凭证随产物扩散的泄露面）。
+  //   后果：交付时必须手工把它放到部署机的 config\ 目录下，与客户端侧同样处理。
+  //   漏放的后果是 fail-safe：服务端会用基线占位符启动并打 [SafetyCheck] WRN，
+  //   而不是默默拿一份带默认凭证的配置上线。
+  // ============================================================================
+  "FastTunnel": {
+    // 根域名：访客侧 ${SubDomain}.${WebDomain} 的后缀匹配就靠它，
+    // 留成占位符的话所有隧道站点都会 404（除非客户端 Webs[].WWW 逐个写全域名）。
+    // 下面这些 change-me-xxx 值都是故意能被启动自检识别的占位符：直接拷过去不改，
+    // 日志里就会有一条 [SafetyCheck] WRN 点名，避免“复制了样例却忘了填”。
+    "WebDomain": "your-domain.example",
+
+    // 客户端登录凭证。两端必须一致，改完服务端与客户端都要重启。
+    // 生成：openssl rand -hex 16
+    "Tokens": [ "change-me-tunnel-token" ],
+
+    "Api": {
+      "JWT": {
+        // 管理端 JWT 签名密钥，≥ 32 字节随机串：openssl rand -base64 48
+        "IssuerSigningKey": "change-me-jwt-signing-key-min-32-bytes",
+        // 令牌有效期，**单位是分钟**（AccountController.GenerateToken 用的是
+        // DateTime.Now.AddMinutes(expiresMinutes)，不是秒，配之前别看错单位）。
+        // 默认 120 = 2 小时，对运维脚本偏长；这里给 60 = 1 小时。
+        "Expires": 60
+      },
+      // GetToken 是 [AllowAnonymous]、CORS 允许任意来源，而且管理接口与访客入口共用监听端口，
+      // 所以这里要么给出强口令，要么直接留空数组（留空 = 签发不了任何令牌 = 管理端接口全部关门）。
+      "Accounts": [
+        {
+          "Name": "ops",
+          "Password": "change-me-admin-password"
+        }
+      ]
+    }
+  }
+}

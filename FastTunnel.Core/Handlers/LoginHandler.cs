@@ -48,7 +48,7 @@ public class LoginHandler : ILoginHandler
         var tips = new List<string>();
 
         await client.webSocket.SendCmdAsync(MessageType.Log, $"穿透协议 | 映射关系（公网=>内网）", cancellationToken);
-        Thread.Sleep(300);
+        await Task.Delay(300, cancellationToken);
 
         if (requet.Webs != null && requet.Webs.Any())
         {
@@ -56,11 +56,14 @@ public class LoginHandler : ILoginHandler
             foreach (var item in requet.Webs)
             {
                 var hostName = $"{item.SubDomain}.{server.ServerOption.CurrentValue.WebDomain}".Trim().ToLower();
-                var info = new WebInfo { Socket = client.webSocket, WebConfig = item };
 
                 logger.LogDebug($"new domain '{hostName}'");
-                server.WebList.AddOrUpdate(hostName, info, (key, oldInfo) => { return info; });
-                (proxyConfig as FastTunnelInMemoryConfigProvider).AddWeb(hostName);
+                var info = server.RegisterWeb(hostName, item, client);
+                if (info == null)
+                {
+                    await client.webSocket.SendCmdAsync(MessageType.Log, $"  HTTP   | 域名 '{hostName}' 不合法，已跳过该站点", CancellationToken.None);
+                    continue;
+                }
 
                 await client.webSocket.SendCmdAsync(MessageType.Log, $"  HTTP   | http://{hostName}:{client.ConnectionPort} => {item.LocalIp}:{item.LocalPort}", CancellationToken.None);
                 client.AddWeb(info);
@@ -71,11 +74,17 @@ public class LoginHandler : ILoginHandler
                     {
                         // TODO:validateDomain
                         hostName = www.Trim().ToLower();
-                        server.WebList.AddOrUpdate(www, info, (key, oldInfo) => { return info; });
-                        (proxyConfig as FastTunnelInMemoryConfigProvider).AddWeb(www);
 
-                        await client.webSocket.SendCmdAsync(MessageType.Log, $"  HTTP   | http://{www}:{client.ConnectionPort} => {item.LocalIp}:{item.LocalPort}", CancellationToken.None);
-                        client.AddWeb(info);
+                        // 别名域名用独立的 WebInfo，注销时才能逐个从路由表摘干净
+                        var alias = server.RegisterWeb(hostName, item, client);
+                        if (alias == null)
+                        {
+                            await client.webSocket.SendCmdAsync(MessageType.Log, $"  HTTP   | 域名 '{hostName}' 不合法，已跳过该别名", CancellationToken.None);
+                            continue;
+                        }
+
+                        await client.webSocket.SendCmdAsync(MessageType.Log, $"  HTTP   | http://{hostName}:{client.ConnectionPort} => {item.LocalIp}:{item.LocalPort}", CancellationToken.None);
+                        client.AddWeb(alias);
                     }
                 }
             }
@@ -104,7 +113,8 @@ public class LoginHandler : ILoginHandler
                             server.ForwardList.TryRemove(item.RemotePort, out var _);
                         }
 
-                        // TODO: 客户端离线时销毁
+                        // 监听端口绑 0.0.0.0：客户端离线时由 TunnelClient 注销流程统一
+                        // Stop() 并从 ForwardList 摘掉，不靠这里回收。
                         IPortListener ls = item.Protocol == ProtocolEnum.UDP
                             ? new UdpProxyListener("0.0.0.0", item.RemotePort, logger, client.webSocket)
                             : new PortProxyListener("0.0.0.0", item.RemotePort, logger, client.webSocket);
@@ -112,7 +122,6 @@ public class LoginHandler : ILoginHandler
 
                         var forwardInfo = new ForwardInfo<ForwardHandlerArg> { Listener = ls, Socket = client.webSocket, SSHConfig = item };
 
-                        // TODO: 客户端离线时销毁
                         server.ForwardList.TryAdd(item.RemotePort, forwardInfo);
                         logger.LogDebug($"SSH proxy success: {item.RemotePort} => {item.LocalIp}:{item.LocalPort}");
 
@@ -140,13 +149,30 @@ public class LoginHandler : ILoginHandler
         }
 
         if (!hasTunnel)
+        {
             await client.webSocket.SendCmdAsync(MessageType.Log, TunnelResource.NoTunnel, CancellationToken.None);
+        }
+
+        client.LoginCompleted = true;
+        logger.LogInformation($"[Session {client.SessionId}] 登录完成：HTTP 站点 {client.WebInfos.Count} 个，端口转发 {client.ForwardInfos.Count} 个，"
+            + $"当前 WebList {server.WebList.Count}｜ForwardList {server.ForwardList.Count}");
     }
 
 
     public virtual async Task<bool> HandlerMsg(FastTunnelServer fastTunnelServer, TunnelClient tunnelClient, string lineCmd, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(lineCmd))
+        {
+            logger.LogWarning($"收到空的控制指令，来源 {tunnelClient.RemoteIpAddress}，已忽略");
+            return false;
+        }
+
         var msg = JsonSerializer.Deserialize<LogInMassage>(lineCmd, SourceGenerationContext.Default.LogInMassage);
+        if (msg == null)
+        {
+            logger.LogWarning($"控制指令无法解析为登录信息，来源 {tunnelClient.RemoteIpAddress}，已忽略");
+            return false;
+        }
 
         await HandleLoginAsync(fastTunnelServer, tunnelClient, msg, cancellationToken);
         return NeedRecive;

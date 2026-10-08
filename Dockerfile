@@ -1,15 +1,20 @@
 #See https://aka.ms/containerfastmode to understand how Visual Studio uses this Dockerfile to build your images for faster debugging.
+#
+# 运行时版本必须与 Directory.Build.props 里的 <TargetFramework> 保持一致
+# （当前为 net10.0）。改成其它版本时同步修改下面两个镜像标签。
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
-EXPOSE 80
-EXPOSE 443
+# 控制通道（WebSocket）与 HTTP 穿透端口，实际端口以 config/appsettings.json 为准
+EXPOSE 1270
+EXPOSE 8080
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY ["FastTunnel.Server/FastTunnel.Server.csproj", "FastTunnel.Server/"]
 COPY ["FastTunnel.Core/FastTunnel.Core.csproj", "FastTunnel.Core/"]
-COPY ["FastTunnel.Api/FastTunnel.Api.csproj", "FastTunnel.Api/"]
+# 不再 COPY FastTunnel.Api：它不在 FastTunnel.sln 里、Server 也没 ProjectReference 它，
+# 属于 net7.0 遗留项目；把它列进这里只会让人误以为服务端依赖它。
 RUN dotnet restore "FastTunnel.Server/FastTunnel.Server.csproj"
 COPY . .
 WORKDIR "/src/FastTunnel.Server"

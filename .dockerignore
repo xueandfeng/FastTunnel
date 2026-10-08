@@ -21,5 +21,15 @@
 **/obj
 **/secrets.dev.yaml
 **/values.dev.yaml
+
+# 部署机真实凭证：已被 .gitignore 排除，但 .dockerignore 不管 git，不写就会随构建上下文
+# 上传到 daemon 并落在 build 阶段的 /src 里（最终镜像不带——csproj 已排除它的 Content 拷贝——
+# 但没必要把密钥送进构建上下文这一趟）。
+**/appsettings.Production.json
+
+# 本地测试床与文档产物（体积大、且与镜像无关）
+# 注意：.dockerignore 的路径不带前导 /，写 docs/** 而不是 /docs/
+docs/**
+.ft-ha-test/**
 LICENSE
 README.md

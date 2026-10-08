@@ -13,9 +13,10 @@
 </div>
 <div align="center">
 
-# More open source projects
+# Sponsor
+If `FastTunel` gives you value, might as well ☕ [sponsor a cup of coffee](https://afdian.com/a/gui_h/plan)~。  
 
-## Since I couldn't afford Navicat, I built my own Navicat. [Daro - Navicat replacement](https://github.com/SpringHgui/daro)
+## new open-source task scheduling system, welcome to learn more about [OpenTask](https://github.com/SpringHgui/OpenTask)
 
 </div>
 

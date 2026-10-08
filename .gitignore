@@ -15,3 +15,17 @@ publish
 /FastTunnel.Server/.config
 /FastTunnel.Server/logs
 /FastTunnel.Client/appsettings.Development.json
+
+# 本地真实配置（仓库里只保留占位符，真实值只留在部署机）
+/FastTunnel.Server/config/appsettings.Production.json
+/FastTunnel.Client/appsettings.Production.json
+logs/
+
+# 本地测试床与临时产物（含压测大文件与运行日志，不进仓库）
+/.ft-ha-test/
+/.qoder_tmp_v3/
+/qoder_diff.txt
+/docs/perf-test/
+# 上线清单里写了部署机的真实公网 IP、根域与端口，只留在部署机，不入库
+/docs/生产上线清单.md
+*.bin

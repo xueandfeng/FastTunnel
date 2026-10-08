@@ -1,7 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Version>2.2.0</Version>
+    <!-- 这个 Version 就是登录时发给服务端的版本号的来源：FastTunnelClient 用
+         AssemblyUtility.GetVersion()（= Assembly.GetExecutingAssembly()，即本程集）填
+         FastTunnel-Version 头，而不是 FastTunnel.Client.exe 自己的版本。
+         以前它停在 2.2.0，导致 2.3.0 客户端上报 “2.2.0.0”：日志里的“本地版本”骗人，
+         而且服务端只比 Major，任何 2.x 旧客户端都能静默连上 2.3.0 服务端。
+         与 FastTunnel.Core / FastTunnel.Client 对齐，三个 Version 必须同改。 -->
+    <Version>2.3.0</Version>
     <TargetFrameworks>netcoreapp3.1;net5.0;net6.0;net7.0;net8.0;net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <LangVersion>preview</LangVersion>

@@ -25,6 +25,14 @@ namespace FastTunnel.Core.Handlers.Client
         readonly ILogger<SwapHandler> _logger;
         static int connectionCount;
 
+        // 隧道两端 NetworkStream 的 ReadTimeout。
+        // 注意：这个值在转发路径上实际不起作用——数据是用 CopyToAsync（异步读）搬的，
+        // 而 NetworkStream.ReadTimeout 只管同步 Read（本机实测：把它调到 10 秒，
+        // 后台 40 秒才回首包的请求仍然 200@40.04 秒，没被提前掐断）。
+        // 保留这个写死的值只是历史行为，不要把它当成“链路空闲上限”去调优：
+        // 想限制后台不出字的时长，用服务端的 WebResponseTimeoutSeconds。
+        private const int TunnelStreamReadTimeoutMs = 1000 * 60 * 10;
+
         public SwapHandler(ILogger<SwapHandler> logger)
         {
             _logger = logger;
@@ -178,13 +186,13 @@ namespace FastTunnel.Core.Handlers.Client
         private async Task<Stream> createLocal(string requestId, string localhost, CancellationToken cancellationToken)
         {
             var socket = await DnsSocketFactory.ConnectAsync(localhost.Split(":")[0], int.Parse(localhost.Split(":")[1]));
-            return new NetworkStream(socket, true) { ReadTimeout = 1000 * 60 * 10 };
+            return new NetworkStream(socket, true) { ReadTimeout = TunnelStreamReadTimeoutMs };
         }
 
         private async Task<Stream> createRemote(string requestId, FastTunnelClient cleint, CancellationToken cancellationToken)
         {
             var socket = await DnsSocketFactory.ConnectAsync(cleint.Server.ServerAddr, cleint.Server.ServerPort);
-            Stream serverStream = new NetworkStream(socket, true) { ReadTimeout = 1000 * 60 * 10 };
+            Stream serverStream = new NetworkStream(socket, true) { ReadTimeout = TunnelStreamReadTimeoutMs };
 
             if (cleint.Server.Protocol == "wss")
             {

@@ -60,7 +60,9 @@ namespace FastTunnel.Core.Forwarder
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            Console.Write(Encoding.UTF8.GetString(buffer, offset, count));
+            // 本类型是 OfflinePage() 交给 ConnectCallback 的“假连接”，HttpClient 会把整条访客请求
+            // （请求行 + 请求头 + 请求体）写进来。这里只置位完成标记，不回显载荷：原
+            // Console.Write 会把上传内容打进标准输出，而 Console 是同步写且坐在降级热路径上（D-17）。
             complete = true;
         }
 

@@ -1,11 +1,12 @@
 #See https://aka.ms/containerfastmode to understand how Visual Studio uses this Dockerfile to build your images for faster debugging.
+#
+# 客户端是普通控制台程序（不需要 ASP.NET Core 共享框架），用 runtime 镜像更小；
+# 镜像版本同样要跟 Directory.Build.props 的 <TargetFramework> 对齐。
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS base
 WORKDIR /app
-EXPOSE 80
-EXPOSE 443
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY ["FastTunnel.Client/FastTunnel.Client.csproj", "FastTunnel.Client/"]
 COPY ["FastTunnel.Core.Client/FastTunnel.Core.Client.csproj", "FastTunnel.Core.Client/"]
@@ -20,4 +21,6 @@ RUN dotnet publish "FastTunnel.Client.csproj" -c Release -o /app/publish
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+# appsettings.json 里的 ServerAddr/Token/心跳参数建议用卷覆盖，例：
+#   docker run -v $PWD/client-appsettings.json:/app/appsettings.json:ro ...
 ENTRYPOINT ["dotnet", "FastTunnel.Client.dll"]

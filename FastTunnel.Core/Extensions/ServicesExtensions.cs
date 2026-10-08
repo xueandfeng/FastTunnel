@@ -71,9 +71,10 @@ public static class ServicesExtensions
                 return Task.CompletedTask;
             }
 
-            context.Response.StatusCode = 200;
-            context.Response.WriteAsync(TunnelResource.Page_NotFound, CancellationToken.None);
-            return Task.CompletedTask;
+            // “域名对但站点没注册”同样是失败，不能回 200：否则监控与客户端把“查无此站”当成成功。
+            // 这里用 404（资源不存在）而不是 503（服务端暂时不可用），两者在告警里语义不同。
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return context.Response.WriteAsync(TunnelResource.Page_NotFound, CancellationToken.None);
         });
     }
 }
