@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net6.0;net7.0;net8.0;net10.0</TargetFrameworks>
+    <!-- 只留 net10.0。原来这里并列 net6.0;net7.0;net8.0;net10.0，但依赖已经跟着运行时
+         升到 10.0.8，那几个旧框架只是每版多编几份从未实测过的产物；而且多框架
+         让 #if NET8_0_OR_GREATER 这类分支一直留着两套实现，旧那套没人跑过。
+         代价：这是发到 nuget.org 的库，单框架之后 .NET 6/7/8 的使用者不能引本版本。 -->
+    <TargetFramework>net10.0</TargetFramework>
     <Version>2.3.0</Version>
     <PackageProjectUrl>https://github.com/SpringHgui/FastTunnel</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net7.0</TargetFrameworks>
+    <!-- 只留 net10.0，与 FastTunnel.Core 对齐（本项目直引 Core，Core 已经是单框架，
+         留在 net7.0 只能拿 Core 的旧框架产物，现在 Core 不再生成那些）。-->
+    <TargetFramework>net10.0</TargetFramework>
     <Version>1.1.0</Version>
     <PackageProjectUrl>https://github.com/FastTunnel/FastTunnel/tree/v2/FastTunnel.Api</PackageProjectUrl>
     <RepositoryUrl>https://github.com/FastTunnel/FastTunnel/tree/v2/FastTunnel.Api</RepositoryUrl>
@@ -9,9 +11,12 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.4" />
-    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="6.34.0" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="6.34.0" />
+    <!-- 跟服务端（FastTunnel.Server）同版本：JwtBearer 6.0.4 已停维且命中
+         GHSA 高危通告，挂在 net10.0 上属于跳代次用。IdentityModel 两个包跟到
+         JwtBearer 10.0.8 带的同一代（8.0.1），不要往回钉。-->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.8" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.0.1" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.0.1" />
   </ItemGroup>
 
   <ItemGroup>

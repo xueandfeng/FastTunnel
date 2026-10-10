@@ -6,7 +6,8 @@ orbs:
 jobs:
   build:
     docker:
-      - image: mcr.microsoft.com/dotnet/sdk:5.0
+      # 必须跟 Directory.Build.props 里的 TargetFramework 同代：net10.0 用 sdk:5.0 镜像直接编不过
+      - image: mcr.microsoft.com/dotnet/sdk:10.0
     environment:
       DOTNET_ROLL_FORWARD_ON_NO_CANDIDATE_FX: 0
     steps:
@@ -16,4 +17,5 @@ jobs:
           command: dotnet restore
       - run:
           name: "Run Build step"
-          command: dotnet publish -c Release -r win10-x64
+          # win10-x64 是早先的 RID 别名，现在用 win-x64
+          command: dotnet publish -c Release -r win-x64

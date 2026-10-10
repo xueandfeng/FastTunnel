@@ -14,14 +14,24 @@
 
   <ItemGroup>
     <!-- 真实的部署机覆盖配置（含客户端 Token、JWT 签名密钥、管理端口令）不进构建产物。
-         Microsoft.NET.Sdk.Web 默认把 config 下的 *.json 当 Content 拷到 bin/publish，
-         而本文件已在 .gitignore 里，很容易被误认为“不在仓库 = 不在产物”。
          代价：部署时必须把 config\appsettings.Production.json 手工放到目标目录，
          与客户端侧 appsettings.Production.json 的做法一致（步骤见部署机留档的上线清单，
          该文档含真实公网地址与根域，已在 .gitignore 里排除，不入库）。 -->
-    <Content Remove="config\appsettings.Production.json" />
     <None Remove="config\appsettings.Production.json" />
   </ItemGroup>
+
+  <!-- 上面那组 Remove 单独用不够：实测 dotnet publish 仍会把该文件拷进产物（2026-10-09 发布到空目录
+       后 config\appsettings.Production.json 仍在，且 dotnet msbuild -getItem:Content 里它也在列表中、
+       带 CopyToPublishDirectory=PreserveNewest）——config 下的 *.json 是被 SDK 默认项（StaticWebAssets
+       那一套 props）在项目体之后加回 Content 的，所以必须在 target 执行阶段再移除一次。
+       也不能只靠 .dockerignore 挡：镜像的构建上下文就是 publish 产物目录（Dockerfile 里 COPY . /app），
+       产物里带了它，漏一次就是把生产凭证烧进镜像层。 -->
+  <Target Name="KeepProdConfigOutOfArtifacts" BeforeTargets="AssignTargetPaths;GetCopyToPublishDirectoryItems">
+    <ItemGroup>
+      <Content Remove="config\appsettings.Production.json" />
+      <None Remove="config\appsettings.Production.json" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.8" />
@@ -41,6 +51,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="docker-compose.yml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Dockerfile">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="uninstall.bat">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>

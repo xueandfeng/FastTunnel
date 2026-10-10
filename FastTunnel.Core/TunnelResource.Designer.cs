@@ -166,26 +166,22 @@ namespace FastTunnel.Core {
         
         /// <summary>
         ///   查找类似 &lt;!DOCTYPE html&gt;
-        ///&lt;html lang=&quot;en&quot;&gt;
-        ///
+        ///&lt;html lang=&quot;zh-CN&quot;&gt;
         ///&lt;head&gt;
         ///  &lt;meta charset=&quot;utf-8&quot; /&gt;
         ///  &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot; /&gt;
-        ///  &lt;title&gt;FastTunnel&lt;/title&gt;
-        ///  &lt;link href=&quot;https://cdn.bootcss.com/twitter-bootstrap/4.4.1/css/bootstrap.min.css&quot; rel=&quot;stylesheet&quot;&gt;
+        ///  &lt;meta name=&quot;robots&quot; content=&quot;noindex, nofollow&quot; /&gt;
+        ///  &lt;title&gt;页面不存在&lt;/title&gt;
         ///  &lt;style&gt;
-        ///    .err-info {
-        ///      margin-top: 120px;
-        ///    }
-        ///
-        ///    /* Provide sufficient contrast against white background */
-        ///    a {
-        ///      color: #0366d6;
-        ///    }
-        ///
-        ///    .btn-primary {
-        ///      color: #fff;
-        ///      background-color [字符串的其余部分被截断]&quot;; 的本地化字符串。
+        ///    body {
+        ///      margin: 0;
+        ///      min-height: 100vh;
+        ///      display: flex;
+        ///      align-items: center;
+        ///      justify-content: center;
+        ///      background: #f7f8fa;
+        ///      color: #1f2329;
+        ///      font: 16px/1.6 [字符串的其余部分被截断]&quot;; 的本地化字符串。
         /// </summary>
         public static string Page_NotFound {
             get {
@@ -195,26 +191,22 @@ namespace FastTunnel.Core {
         
         /// <summary>
         ///   查找类似 &lt;!DOCTYPE html&gt;
-        ///&lt;html lang=&quot;en&quot;&gt;
-        ///
+        ///&lt;html lang=&quot;zh-CN&quot;&gt;
         ///&lt;head&gt;
         ///  &lt;meta charset=&quot;utf-8&quot; /&gt;
         ///  &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1.0&quot; /&gt;
-        ///  &lt;title&gt;FastTunnel&lt;/title&gt;
-        ///  &lt;link href=&quot;https://cdn.bootcss.com/twitter-bootstrap/4.4.1/css/bootstrap.min.css&quot; rel=&quot;stylesheet&quot;&gt;
+        ///  &lt;meta name=&quot;robots&quot; content=&quot;noindex, nofollow&quot; /&gt;
+        ///  &lt;title&gt;服务暂时不可用&lt;/title&gt;
         ///  &lt;style&gt;
-        ///    .err-info {
-        ///      margin-top: 120px;
-        ///    }
-        ///
-        ///    /* Provide sufficient contrast against white background */
-        ///    a {
-        ///      color: #0366d6;
-        ///    }
-        ///
-        ///    .btn-primary {
-        ///      color: #fff;
-        ///      background-color [字符串的其余部分被截断]&quot;; 的本地化字符串。
+        ///    body {
+        ///      margin: 0;
+        ///      min-height: 100vh;
+        ///      display: flex;
+        ///      align-items: center;
+        ///      justify-content: center;
+        ///      background: #f7f8fa;
+        ///      color: #1f2329;
+        ///      font: 16px/1.6 [字符串的其余部分被截断]&quot;; 的本地化字符串。
         /// </summary>
         public static string Page_Offline {
             get {

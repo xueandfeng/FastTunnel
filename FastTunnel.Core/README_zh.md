@@ -146,8 +146,8 @@ ssh -oPort=12701 root@x.x.x.x
 ![img1](images/remote.png)
   
 ## 开发/PR
-- 安装 `vs2019` 最新版本
-- 安装 `.Net5` 或以上版本 `https://dotnet.microsoft.com/download/dotnet/5.0`
+- 安装 `vs2022` 最新版本
+- 安装 `.NET 10` 运行时 `https://dotnet.microsoft.com/download/dotnet/10.0`
 - host文件中添加 `test.test.cc 127.0.0.1`等
 - 启动 fasttunnel.server
 - 启动 fasttunnel.client

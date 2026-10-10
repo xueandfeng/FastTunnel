@@ -1,0 +1,54 @@
+# FastTunnel 服务端（服务器上放 /opt/dotnet/fasttunnel/docker-compose.yml，用法见 fasttunnel.sh）
+#
+# docker-compose 1.x 与 docker compose 插件都能用这份文件。改完配置重跑脚本即可，不必重新出镜像。
+
+# 这个 version 是故意留的：CentOS 7 上 EPEL 装的 docker-compose 1.29 看不到 version 会按 v1 格式
+# 解析（把顶层 services 当服务名），直接报莫名其妙的错；compose v2 看到这个字段只警告一句
+# “已废弃、被忽略”，不影响运行。真撞上那台机器上有版本要求时，它比猜格式便宜。
+version: "3.7"
+
+services:
+  fasttunnel:
+    build: .
+    image: fasttunnel_server:latest
+    container_name: fasttunnel_server
+    restart: always
+    # 桥接网络 + 显式端口映射（不用 host 网络）。右侧端口必须等于容器内 urls 里的端口：
+    # 2.3.0 起监听端口只由挂进来的 config/appsettings*.json 的 urls 决定（ASPNETCORE_URLS /
+    # --urls 会被配置源覆盖），-p 能改的是宿主机侧端口，改不了容器内监听端口。
+    # 单端口形态（2026-10-10 定）只有一条映射；要换对外端口只改左侧，并同步改两端：
+    #   "22443:1270" → 客户端 appsettings 的 Server.ServerPort 与安全组放行号一起改成 22443
+    #   不管左侧换成什么号，前置 Nginx 的 upstream 得跟着指到同一个宿主端口
+    ports:
+      # 1270 一条口承载三类流量：客户端控制通道、客户端回拨的 PROXY 数据通道、访客 HTTP。
+      # 宿主侧保持 1270 与容器内一致，这样客户端 ServerPort 与既有安全组规则都不用动
+      #（这里曾写过 "1272:1270"，那要求客户端也改成 1272，现已按 1270 对齐）。
+      # ⚠ 这条是对公网开放的（客户端要从公网打进来），限源靠云安全组只放行各客户端出口 IP：
+      #   前置 Nginx 在同机、回源 127.0.0.1:1270 不出网卡、不受安全组影响，访客仍只能从 443 进。
+      # ⚠ 不要写成 "127.0.0.1:1270:1270"，那会把公网客户端一起挡死。
+      - "1272:1270"
+    # ⚠ 两个必须知道的语义（详见 docs/生产上线清单.md §3.0）：
+    #   1) 端口一经发布，Docker 会自己往 iptables 插 DNAT 规则，优先于 firewalld 的 INPUT 链 ——
+    #      “firewalld 没放行但外面仍然连得上”在这种形态下是预期现象。单端口下 1270 必须留
+    #      给客户端从公网进来，所以限源只能按源 IP 做（云安全组，或 DOCKER-USER 链先放行客户端
+    #      IP 再 drop 其余）；“内网网卡IP:1270:1270” 这种按网卡收口在单端口形态下不可用，
+    #      会把客户端一起挡掉。
+    #   2) 一旦配置里出现 Forwards（TCP/UDP 端口转发隧道），bridge 就不够用了：那些监听端口是
+    #      客户端登录时由 LoginHandler 按 RemotePort 现场 bind 0.0.0.0 建起来的，compose 无法预知，
+    #      必须改回 network_mode: "host"。当前两端配置只有 Webs，没有 Forwards。
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - TZ=Asia/Shanghai
+    volumes:
+      # 配置权威来源在宿主机：这份 appsettings.Production.json 里有真实 Token / JWT 密钥 / 管理口令，
+      # 也有 urls。它不入库（.gitignore），也不进镜像（csproj 已把它从 Content/None 里移除，
+      # 所以产物目录里没有它，fasttunnel.sh 会再核一道），必须手工放好。
+      # SELinux 为 enforcing 时在这两行末尾加 :z（getenforce 查看）
+      - /opt/conf/fasttunnel:/app/config
+      # Serilog 的文件日志（按天滚动、保留 30 天），容器重建不丢历史
+      - /opt/logs/fasttunnel:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "1"

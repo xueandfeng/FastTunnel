@@ -1,0 +1,54 @@
+# FastTunnel 客户端（放 /opt/dotnet/fasttunnel-client/docker-compose.yml，用法见 fasttunnelclient.sh）
+#
+# 客户端的配置在产物根目录（不是 config/ 子目录），所以只能单文件挂载：整目录挂到 /app
+# 会把镜像里的 dll 一起遮掉。基线 appsettings.json 留在镜像里，宿主这份只放 appsettings.Production.json。
+#
+# 本机部署多份时，这一份文件不用复制：容器名 / 配置目录 / 日志目录都由下面三个变量决定，
+# fasttunnelclient.sh 按实例名注入后再用 `-p <容器名>` 起独立项目，各实例互不干扰。
+# 手工直跑本文件（不经过脚本）时，三个默认值就是最早单实例部署的形态，行为完全不变：
+#   实例   容器名                  配置目录                        日志目录
+#   main   fasttunnel-client       /opt/conf/fasttunnel-client     /opt/logs/fasttunnel-client
+#   <x>    fasttunnel-client-<x>   /opt/conf/fasttunnel-client/x   /opt/logs/fasttunnel-client/x
+# ⚠ 多实例的三条硬要求（都是"配置一样"最容易踩的）：
+#   1) 每个实例都要能直达自己 Webs 里的每一个 LocalIp:LocalPort，否则服务端仍会把这个
+#      死后端排进候选（降级前一直可能轮到它），访客看到的是 502 或干等超时；
+#      fasttunnelclient.sh 起容器前逐个 TCP 探这一段，不通就拦住。
+#   2) 各实例挂的必须是各自目录下的配置文件，不能共用一份路径 —— 那样看起来"分开了"，
+#      实际注册的是同一批站点，改一份两边同时生效。
+#   3) 日志目录也必须按实例分开：容器内的日志文件名（logs/fasttunnel-client-*.log）是固定的，
+#      两份写同一个宿主目录会把掉线原因混在一起，按天滚动与保留天数还会互相删对方的文件。
+# 镜像不需要为每份额外建：哪个实例先跑就哪个把它 build 出来，其余实例复用同一 tag。
+# 真正的"主备"要放在不同物理机上：同机两实例指向 127.0.0.1 的后台时，宿主一挂两份一起没。
+
+# version 是写给 CentOS 7 上 EPEL 的 docker-compose 1.29 的（不写会被按 v1 格式解析）；
+# compose v2 只对它警告一句“已废弃”，不影响运行。
+version: "3.7"
+
+services:
+  fasttunnel-client:
+    # 镜像只有一份，多实例只多容器：下面这个 build: 只为“本地还没镜像时一键首建”服务，
+    # fasttunnelclient.sh 开第二、第三份时直接复用同一 tag（只有重传 dll 后加 --rebuild 才重建），
+    # 所以不会出现“后起的实例把 :latest 换掉、先起的实例下次被静默升级”的镜像漂移
+    build: .
+    image: fasttunnel-client:latest
+    container_name: ${FT_CONTAINER:-fasttunnel-client}
+    restart: always
+    # 客户端只往外连（连服务端 + 连内网后台），本身不监听端口，所以 host 网络下多实例
+    # 也不争端口。但内网后台地址若写 127.0.0.1（与客户端同机），bridge 容器里的回环
+    # 不是宿主机的回环，必须 host 网络才连得上
+    network_mode: "host"
+    environment:
+      # 客户端是通用 Host，认的环境变量是 DOTNET_ENVIRONMENT（不是服务端那个 ASPNETCORE_ 前缀）
+      - DOTNET_ENVIRONMENT=Production
+      - TZ=Asia/Shanghai
+    volumes:
+      # SELinux 为 enforcing 时行末加 :z（getenforce 查看）。宿主这个文件必须预先存在，
+      # 否则 Docker 会在挂载点建一个同名目录，客户端读不到配置 —— fasttunnelclient.sh 先拦一道
+      - ${FT_CONF_DIR:-/opt/conf/fasttunnel-client}/appsettings.Production.json:/app/appsettings.Production.json:ro
+      # Serilog 文件日志（按天滚动、保留 14 天），含启动引导日志 fasttunnel-client-boot-*.log
+      - ${FT_LOG_DIR:-/opt/logs/fasttunnel-client}:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "1"

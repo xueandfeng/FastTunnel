@@ -1,3 +1,6 @@
+# 仓库根这份只对“以源码根为上下文 build”生效（VS Docker 工具链那种）；
+# 2026-10-09 定的交付路线不经过这里：薄镜像的上下文是 publish 产物目录，
+# 那份 Dockerfile 在 FastTunnel.Server\Dockerfile，旁边的 .dockerignore 才是它对应的那份。
 **/.classpath
 **/.dockerignore
 **/.env

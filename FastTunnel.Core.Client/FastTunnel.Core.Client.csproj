@@ -8,7 +8,10 @@
          而且服务端只比 Major，任何 2.x 旧客户端都能静默连上 2.3.0 服务端。
          与 FastTunnel.Core / FastTunnel.Client 对齐，三个 Version 必须同改。 -->
     <Version>2.3.0</Version>
-    <TargetFrameworks>netcoreapp3.1;net5.0;net6.0;net7.0;net8.0;net10.0</TargetFrameworks>
+    <!-- 只留 net10.0，跟 FastTunnel.Core 同口径（本项目 Link 了 Core 的源文件，
+         两边框架不一致会把 #if 分支的不同版本拼到一起）。客户端本来就只跟着
+         服务端跑，.NET Framework / netcoreapp3.1 那种宿主不在支持范围。 -->
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <LangVersion>preview</LangVersion>
   </PropertyGroup>
@@ -34,7 +37,10 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
-    <PackageReference Include="System.IO.Pipelines" Version="10.0.8" />
+    <!-- System.IO.Pipelines 不再显式引用：从 .NET 9 起它已在 Microsoft.NETCore.App
+         共享框架里（本机的 9.0.14 / 10.0.8 目录中有该 DLL，8.0.x 没有），单框架之后
+         再钉一层反而触发 NU1510（冗余引用）。之前必须钉着是为了 netcoreapp3.1~net8.0
+         那几个目标框架。 -->
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,9 @@
+# 两端都是 Linux，交付文件换行必须是 LF。
+# .sh 带上 CRLF 的报错是 "bad interpreter: /usr/bin/env bash^M"，很难往换行上想。
+# .editorconfig 里 [*.sh] 已经写了 end_of_line = lf，但那只管编辑器，拦不住 git 的
+# autocrlf 转换 —— 任何一台 core.autocrlf=true 的机器 checkout 出来就是 CRLF，所以这里在 git 层钉死。
+# 只覆盖 Linux 上会被直接执行/解析的这几类，不动全仓库的归一化策略（避免制造无关 diff）。
+*.sh text eol=lf
+.dockerignore text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf

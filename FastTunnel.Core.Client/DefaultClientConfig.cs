@@ -43,6 +43,13 @@ namespace FastTunnel.Core.Config
         public int MaxReconnectDelaySeconds { get; set; } = 60;
 
         /// <summary>
+        /// 退避等待期间探测服务端端口的间隔（秒），0 = 关闭探活。默认 2 秒。
+        /// 只在「这一轮压根没连上服务端」时生效：等待期间每隔这么久做一次纯 TCP 连接探测，
+        /// 服务端一恢复就立刻打断剩余退避发起重连，不必干等到退避上限。
+        /// </summary>
+        public int ReconnectProbeIntervalSeconds { get; set; } = 2;
+
+        /// <summary>
         /// 连接前是否先 ICMP ping 一次服务端（仅排查网络用，会拖慢重连）。默认 false。
         /// </summary>
         public bool PingBeforeConnect { get; set; }

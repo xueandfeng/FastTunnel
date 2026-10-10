@@ -74,6 +74,9 @@ public static class ServicesExtensions
             // “域名对但站点没注册”同样是失败，不能回 200：否则监控与客户端把“查无此站”当成成功。
             // 这里用 404（资源不存在）而不是 503（服务端暂时不可用），两者在告警里语义不同。
             context.Response.StatusCode = StatusCodes.Status404NotFound;
+            // ContentType 必须自己写上：WriteAsync 在没设置时补的是 text/plain，
+            // 那样访客看到的不是页面而是一屏 HTML 标签。
+            context.Response.ContentType = "text/html; charset=utf-8";
             return context.Response.WriteAsync(TunnelResource.Page_NotFound, CancellationToken.None);
         });
     }

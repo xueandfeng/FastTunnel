@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FastTunnel.Api;
 using FastTunnel.Api.Filters;
@@ -64,11 +65,11 @@ public class FastTunnelApiHostingStartup : IHostingStartup
                             context.Response.ContentType = "application/json;charset=utf-8";
                             context.Response.StatusCode = StatusCodes.Status200OK;
 
-                            await context.Response.WriteAsync(new
+                            await context.Response.WriteAsync(JsonSerializer.Serialize(new
                             {
                                 errorCode = 1,
                                 errorMessage = context.Error ?? "Token is Required"
-                            }.ToJson());
+                            }));
                         },
                     };
                 });

@@ -1,0 +1,5 @@
+# 同 FastTunnel.Server\.dockerignore：正常路线是在产物目录里 build，这里只兜底
+# 直接拿 FastTunnel.Client\ 源码目录当上下文的误操作。
+appsettings.Production.json
+bin/
+obj/

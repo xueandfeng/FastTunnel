@@ -1,0 +1,6 @@
+# 正常路线是在产物目录里 build（见 fasttunnel.sh），这份 .dockerignore 只兜底一种误操作：
+# 有人直接 `docker build FastTunnel.Server` 拿源码目录当上下文。
+# 挡住真实凭证与中间产物，不让它们进镜像层。真正的保险还是 csproj 里那个 KeepProdConfigOutOfArtifacts。
+config/appsettings.Production.json
+bin/
+obj/

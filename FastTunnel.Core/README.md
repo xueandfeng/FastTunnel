@@ -147,8 +147,8 @@ ssh -oPort=12701 root@x.x.x.x
 ![img1](images/remote.png)
     
 ## Development/PR
-- install `vs2019` last version
-- install `.net5` or higher `https://dotnet.microsoft.com/download/dotnet/5.0`
+- install `vs2022` last version
+- install `.NET 10` runtime `https://dotnet.microsoft.com/download/dotnet/10.0`
 - add `test.test.cc   127.0.0.1` in system host file
 - run fasttunnel.server
 - run fasttunnel.client
