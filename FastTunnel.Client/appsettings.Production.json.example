@@ -32,6 +32,8 @@
 
     // 内网 web 节点映射：一个站点一条；SubDomain 拼上服务端 WebDomain 形成访问域名，
     // WWW 里写的则是完整别名域名（需要在服务端 WebDomain 之外单独记一条路由）。
+    // 多台客户端挂同一站点时可给每条加 "Priority"（整数，大的先接流量）固定主备；
+    // 都留默认 0 就是“后登录者优先”，重连后哪台变主是随机的。
     "Webs": [
       {
         "LocalIp": "change-me-inner-site-ip",

@@ -35,6 +35,12 @@ namespace FastTunnel.Core.Models
         public DateTime RegisteredUtc { get; set; } = DateTime.UtcNow;
 
         /// <summary>
+        /// 该后端的选路优先级，取自客户端该站点的 WebConfig.Priority（默认 0）。
+        /// 只在同一个站点上的多个后端之间比：健康后端里优先级大的先选，相等时回到“后注册者优先”。
+        /// </summary>
+        public int Priority { get; set; }
+
+        /// <summary>
         /// 该后端所在控制通道是否还能用。已 Dispose 的 WebSocket 读 State 会抛异常，
         /// 这里一律当作“不可用”，不能让一个诊断属性把请求带倒。
         /// </summary>

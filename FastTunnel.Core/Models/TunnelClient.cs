@@ -102,23 +102,73 @@ public class TunnelClient
     }
 
     /// <summary>
-    /// 接收客户端的消息
+    /// 接收客户端的消息。会话摘要在读循环退出后必写，正常退出与读循环抛异常都写。
     /// </summary>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    public async Task ReviceAsync(CancellationToken cancellationToken)
+    /// <param name="cancellationToken">Kestrel 的请求取消令牌（对端拆链与本进程停机都会触发）。</param>
+    /// <param name="stoppingToken">宿主停机令牌，用来把上面两种情况分开。</param>
+    public async Task ReviceAsync(CancellationToken cancellationToken, CancellationToken stoppingToken = default)
     {
         var utility = new WebSocketUtility(webSocket, ProcessLine);
-        await utility.ProcessLinesAsync(cancellationToken);
 
-        // 会话结束的完整摘要（写进文件日志，不靠现场抓控制台）
+        try
+        {
+            await utility.ProcessLinesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // 读循环里没被 WebSocketUtility 兜住的异常（例如 Pipe 自身出错）。摘要照写，
+            // 异常原样向上抛，调用方的处理路径不变。
+            WriteSessionSummary(utility, cancellationToken, stoppingToken, ex);
+            throw;
+        }
+
+        WriteSessionSummary(utility, cancellationToken, stoppingToken, null);
+    }
+
+    /// <summary>
+    /// 会话结束的完整摘要（写进文件日志，不靠现场抓控制台）。
+    /// </summary>
+    private void WriteSessionSummary(WebSocketUtility utility, CancellationToken cancellationToken,
+        CancellationToken stoppingToken, Exception? escaped)
+    {
         var online = DateTime.Now - StartTime;
         var lastInbound = (int)(DateTime.UtcNow - LastActivityUtc).TotalSeconds;
-        var level = IsAborted ? LogLevel.Information : LogLevel.Warning;
+        // 取消来源是这类排障里最关心的一项：context.RequestAborted 在“对端拆链”和“本进程正在停机”
+        // 两种场合都会触发，只看它分不开，所以要拿停机令牌再判一次。判错方向的代价很大：
+        // 把中间设备周期性拆链当成自己重启，就会去查一个根本没发生过的发布。
+        // 不传 stoppingToken（默认值）时无法区分，只能报“未取消”或“取消来源未接入”。
+        string cancelSource;
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            cancelSource = "无(读循环自行退出)";
+        }
+        else if (stoppingToken.CanBeCanceled)
+        {
+            cancelSource = stoppingToken.IsCancellationRequested ? "本机正在停机" : "对端拆链(本进程未停机)";
+        }
+        else
+        {
+            cancelSource = "未接入停机令牌，无法区分";
+        }
 
-        logger.Log(level, $"[Session {SessionId}] 控制通道结束：{utility.EndReason}｜对端 {RemoteIpAddress}:{RemotePort}｜本地端口 {ConnectionPort}｜"
+        // WS 状态是独立的一路证据：CloseReceived/CloseSent 说明走了关闭握手，
+        // Aborted 说明是被硬拆（本机 Abort 或链路异常），Open 则说明读循环退出时连接看着还活着。
+        // 走了关闭握手的收尾记 INFO：客户端开了会话轮换之后，对端正常发 Close 会每一轮都出一条，
+        // 再按 WRN 记就是把计划内动作混进真故障里（旁边那条“客户端关闭”仍报 WRN，
+        // 它说的是“少了一个后端”这个业务影响，两回事）。
+        var graceful = IsAborted
+            || (escaped == null
+                && (webSocket.State == WebSocketState.CloseReceived
+                    || webSocket.State == WebSocketState.CloseSent
+                    || webSocket.State == WebSocketState.Closed));
+        var level = graceful ? LogLevel.Information : LogLevel.Warning;
+        var tail = escaped == null ? "" : $"｜未捕获异常 {escaped.GetType().Name}: {Abbrev(escaped.Message)}";
+
+        logger.Log(level, $"[Session {SessionId}] 控制通道结束：{utility.EndReason}｜取消来源 {cancelSource}｜WS状态 {webSocket.State}｜"
+            + $"对端 {RemoteIpAddress}:{RemotePort}｜本地端口 {ConnectionPort}｜"
             + $"在线 {FormatSpan(online)}｜控制帧 {controlFrames}（心跳 {heartbeatFrames}/登录 {loginFrames}/其它 {otherFrames}）｜"
-            + $"最后帧 {LastFrameType}｜注册站点 {WebInfos.Count}｜端口转发 {ForwardInfos.Count}｜登录完成 {LoginCompleted}｜距上次入站 {lastInbound}s 前");
+            + $"最后帧 {LastFrameType}｜注册站点 {WebInfos.Count}｜端口转发 {ForwardInfos.Count}｜登录完成 {LoginCompleted}｜"
+            + $"距上次入站 {lastInbound}s 前{tail}");
     }
 
     internal static string FormatSpan(TimeSpan span)

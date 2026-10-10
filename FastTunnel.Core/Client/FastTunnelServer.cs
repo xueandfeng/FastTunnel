@@ -192,6 +192,7 @@ namespace FastTunnel.Core.Client
                 WebConfig = config,
                 Domain = hostName,
                 SessionId = client.SessionId,
+                Priority = config.Priority,
                 RegisteredUtc = DateTime.UtcNow
             };
 

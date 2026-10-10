@@ -9,6 +9,7 @@ using FastTunnel.Core.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Net.WebSockets;
@@ -24,16 +25,25 @@ namespace FastTunnel.Core.Forwarder.MiddleWare
         readonly Version serverVersion;
         readonly ILoginHandler loginHandler;
 
+        /// <summary>
+        /// 宿主停机令牌。它是“对端拆链”与“本进程正在停机”唯一的区分手段：
+        /// context.RequestAborted 在这两种场合都会触发，不带上它就只能把两者写成同一条日志。
+        /// 中间件由 AddSingleton 注册，构造时宿主尚未开始运行，取 IHostApplicationLifetime 安全。
+        /// </summary>
+        readonly IHostApplicationLifetime lifetime;
+
         static int connectionCount;
 
         public static int ConnectionCount => connectionCount;
 
         public FastTunnelClientHandler(
-            ILogger<FastTunnelClientHandler> logger, FastTunnelServer fastTunnelServer, ILoginHandler loginHandler)
+            ILogger<FastTunnelClientHandler> logger, FastTunnelServer fastTunnelServer, ILoginHandler loginHandler,
+            IHostApplicationLifetime lifetime)
         {
             this.logger = logger;
             this.fastTunnelServer = fastTunnelServer;
             this.loginHandler = loginHandler;
+            this.lifetime = lifetime;
 
             serverVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
         }
@@ -103,12 +113,15 @@ namespace FastTunnel.Core.Forwarder.MiddleWare
             try
             {
                 fastTunnelServer.ClientLogin(client);
-                await client.ReviceAsync(context.RequestAborted);
+                await client.ReviceAsync(context.RequestAborted, lifetime.ApplicationStopping);
             }
             catch (Exception ex)
             {
-                // 这里只会出现读循环本身的链路异常；固定 Errno 信息已记在会话摘要里，
-                // 只记一条简短警告，避免扫描流量把完整堆栈刷满日志。
+                // 走到这里的只剩下读循环自身的链路异常。对端拆链那种取消已经不再逃到这里：
+                // WebSocketUtility 把它当正常退出路径收下，会话摘要（含取消来源、距上次入站）
+                // 由 TunnelClient 自己写完，不再只剩下面这一句没有现场信息的话。
+                // 固定 Errno 信息已记在会话摘要里，只记一条简短警告，
+                // 避免扫描流量把完整堆栈刷满日志。
                 logger.LogWarning($"[Session {client.SessionId}] 控制通道异常终止：{ex.GetType().Name}: {Abbrev(ex.Message)}");
             }
             finally

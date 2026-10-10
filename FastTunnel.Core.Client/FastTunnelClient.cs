@@ -47,6 +47,24 @@ public class FastTunnelClient : IFastTunnelClient
     /// <summary>心跳单飞标记，避免上一次发送未完成时堆积。</summary>
     private int heartbeatPending;
 
+    /// <summary>
+    /// 会话主动轮换定时器（仅 MaxSessionMinutes &gt; 0 时创建）。每个会话一个，随会话结束 Dispose；
+    /// 只对它自己那条连接生效（见 RotateSessionAsync 里的归属判定）。
+    /// </summary>
+    private Timer? rotationTimer;
+
+    /// <summary>
+    /// 本轮会话的实际轮换时刻（秒，0 = 不开）。它是 MaxSessionMinutes 加上本轮随机抖动后的结果，
+    /// 日志只能报这个值，报配置阈值会让人拿它去对时间线而对不上。
+    /// </summary>
+    private int rotationDueSeconds;
+
+    /// <summary>
+    /// 本轮会话是不是自己主动轮换结束的（0 = 不是）。它决定日志口径与要不要退避：
+    /// 把计划内轮换记成一次异常掉线，既会把告警带偏，也会把后续真实故障的退避起点抬高一档。
+    /// </summary>
+    private int rotationRequested;
+
     /// <summary>0 = 尚未确认，1 = 服务端支持应用层心跳，-1 = 服务端不支持（已降级）。</summary>
     private int heartbeatState;
 
@@ -115,11 +133,16 @@ public class FastTunnelClient : IFastTunnelClient
             heartbeatTicks = 0;
             lastRttMs = -1;
             Interlocked.Exchange(ref heartbeatPending, 0);
+            Interlocked.Exchange(ref rotationRequested, 0);
+            // 轮换时刻只给下面算日志用，不在 StopRotation 里清（那会发生在读循环退出之后、记日志之前），
+            // 改在每轮开头清，免得把上一轮的时刻当成这一轮的。
+            Volatile.Write(ref rotationDueSeconds, 0);
 
             try
             {
                 await loginAsync(cancellationToken);
                 StartHeartbeat();
+                StartRotation();
                 await ReceiveServerAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -133,6 +156,9 @@ public class FastTunnelClient : IFastTunnelClient
             finally
             {
                 StopHeartbeat();
+                // 轮换定时器必须随会话一起停。上一轮如果在第 3 分钟就掉了线，定时器不拆就会
+                // 在第 N 分钟把当时活着的新会话一刀切断 —— 看起来就像“不定时重连”自己多了起来。
+                StopRotation();
             }
 
             if (cancellationToken.IsCancellationRequested)
@@ -161,14 +187,21 @@ public class FastTunnelClient : IFastTunnelClient
 
             // 能撑过 1 分钟的会话说明不是本地反复闪断，多半是链路中间设备把会话回收了，
             // 重连间隔退回基础值；只有在短时间内连续掉线才做指数退避。
-            consecutiveFailures = alive.TotalSeconds >= 60 ? 0 : consecutiveFailures + 1;
+            // 主动轮换是计划内动作，既不算快速掉线也不算链路故障，单独走 INFO + 立即重连。
+            var rotated = Volatile.Read(ref rotationRequested) == 1 && !cancellationToken.IsCancellationRequested;
+            consecutiveFailures = (rotated || alive.TotalSeconds >= 60) ? 0 : consecutiveFailures + 1;
             var delay = NextReconnectDelaySeconds(consecutiveFailures);
             var reason = DescribeEnd(fault);
             var silent = (int)(DateTime.UtcNow - lastRecvUtc).TotalSeconds;
             var stats = $"收帧 {recvFrames}（Swap {swapFrames}）｜发帧 {sentFrames}（心跳 {heartbeatTicks}）｜RTT {RttText()}｜距上次入站 {silent}s 前";
             var probeHint = ShouldProbeDuringBackoff() ? $"｜期间每 {ClientConfig.ReconnectProbeIntervalSeconds}s 探活端口，通了立即重连" : "";
 
-            if (alive.TotalSeconds >= 60)
+            if (rotated)
+            {
+                _logger.LogInformation($"[Control] 会话按轮换计划主动结束（本次到期时刻 {FormatDue(Volatile.Read(ref rotationDueSeconds))}"
+                    + $"，配置阈值 {ClientConfig.MaxSessionMinutes} 分钟）｜本次在线 {FormatAlive(alive)}｜{stats}｜立即重连（不等退避）");
+            }
+            else if (alive.TotalSeconds >= 60)
             {
                 _logger.LogWarning($"[Control] 会话结束：{reason}｜本次在线 {FormatAlive(alive)}｜{stats}｜{delay}s 后重连{probeHint}");
             }
@@ -184,7 +217,14 @@ public class FastTunnelClient : IFastTunnelClient
 
             try
             {
-                if (ShouldProbeDuringBackoff())
+                if (rotated)
+                {
+                    // 主动轮换后不等退避：刚刚还是健康的连接，服务端就在那里，多等 5 秒只是
+                    // 多给本实例的后端注册挖 5 秒坑（靠另一台顶上，但坑越浅越好）。
+                    // 若紧接着的重连真的失败，下一轮会照常进入退避，不会在这转空循环。
+                    lastBackoffCutShort = false;
+                }
+                else if (ShouldProbeDuringBackoff())
                 {
                     lastBackoffCutShort = await WaitForServerOpenAsync(delay, cancellationToken);
                     if (lastBackoffCutShort)
@@ -379,7 +419,8 @@ public class FastTunnelClient : IFastTunnelClient
         }
 
         _logger.LogInformation($"控制通道已连上 {url}｜WS 控制帧间隔 {(ClientConfig.WsKeepAliveSeconds > 0 ? ClientConfig.WsKeepAliveSeconds + "s" : "默认 30s")}｜"
-            + $"应用层心跳 {(ClientConfig.HeartbeatSeconds > 0 ? ClientConfig.HeartbeatSeconds + "s" : "已关闭")}｜本地版本 {AssemblyUtility.GetVersion()}");
+            + $"应用层心跳 {(ClientConfig.HeartbeatSeconds > 0 ? ClientConfig.HeartbeatSeconds + "s" : "已关闭")}｜"
+            + $"会话轮换 {(ClientConfig.MaxSessionMinutes > 0 ? $"已开（阈值 {ClientConfig.MaxSessionMinutes} 分钟 + 0~{ClientConfig.SessionRotateJitterSeconds} 秒抖动，具体时刻见下一条日志）" : "已关闭")}｜本地版本 {AssemblyUtility.GetVersion()}");
         Interlocked.Increment(ref sentFrames);
 
         // 登录
@@ -504,6 +545,151 @@ public class FastTunnelClient : IFastTunnelClient
         Interlocked.Exchange(ref heartbeatTimer, null)?.Dispose();
     }
 
+    /// <summary>
+    /// 启动会话主动轮换：到点就自己把这条连接换掉。
+    /// 它治的是“最长会话时长”那一类硬上限：中间设备（NAT/防火墙/上网行为管理）常见 7200 秒
+    /// 封顶，那种上限不看流量、也不给拆链报文，心跳发得再密也会被砍（实测本链路两条连接
+    /// 都在在线整 2 小时时被打断，而当时 RTT 5-8ms、心跳回包正常）。唯一能控的手段就是自己先到点重连，
+    /// 把断开从“设备选的时刻”改成“本端选的时刻”。
+    /// 动作与优雅停机同一套：发 WebSocket Close 帧。服务端的读循环会当场读到 Close 并注销会话、
+    /// 摘掉本实例的后端注册（而不是等一条悬空的死后端），同时本端的读循环也因收到对端 Close 帧自然退出。
+    /// MaxSessionMinutes &lt;= 0 时不开（默认），单实例部署可以保持关闭。
+    /// 实际到期时刻还要加上 SessionRotateJitterSeconds 以内的随机秒数，让多台客户端不必人工错开取值
+    /// 也不会撞在同一刻一起换连接。
+    /// </summary>
+    private void StartRotation()
+    {
+        StopRotation();
+
+        var minutes = ClientConfig.MaxSessionMinutes;
+        if (minutes <= 0)
+        {
+            return;
+        }
+
+        // 把本条连接固定给定时器：Dispose 与回调存在竞态窗口，不判归属就会误伤下一轮会话。
+        var target = socket;
+        if (target == null)
+        {
+            return;
+        }
+
+        // 按秒取随机而不是按分钟：两台就算配了同样的阈值，也要落在同一秒才算重合，
+        // 撞车概率从“同一分钟”量级降到秒级。每轮重新取，所以上一轮撞过不代表这一轮还撞。
+        var jitter = ClientConfig.SessionRotateJitterSeconds > 0 ? ClientConfig.SessionRotateJitterSeconds : 0;
+        var dueSeconds = (minutes * 60) + (jitter > 0 ? Random.Shared.Next(0, jitter + 1) : 0);
+        Volatile.Write(ref rotationDueSeconds, dueSeconds);
+
+        rotationTimer = new Timer(
+            _ => _ = RotateSessionAsync(target),
+            null,
+            TimeSpan.FromSeconds(dueSeconds),
+            Timeout.InfiniteTimeSpan);
+
+        _logger.LogInformation($"[Control] 会话轮换已排期：本次在线满 {FormatDue(dueSeconds)} 后主动重连（提前躲开中间设备的会话时长上限）"
+            + $"｜阈值 {minutes} 分钟｜抖动 0~{jitter} 秒");
+    }
+
+    private void StopRotation()
+    {
+        Interlocked.Exchange(ref rotationTimer, null)?.Dispose();
+    }
+
+    /// <summary>
+    /// 把轮换到期秒数说成人能读的形式（不带毫秒，也不要“0小时”这种噪声）。
+    /// </summary>
+    private static string FormatDue(int dueSeconds)
+    {
+        var span = TimeSpan.FromSeconds(dueSeconds);
+        return span.Hours > 0
+            ? $"{(int)span.TotalHours}小时{span.Minutes:00}分{span.Seconds:00}秒"
+            : $"{span.Minutes}分{span.Seconds:00}秒";
+    }
+
+    /// <summary>
+    /// 到点把本条连接主动换掉。只在“它还是当前活动的那条、且仍处于 Open”时执行；
+    /// 否则就当这次轮换没发生（日志与退避口径仍归为一次真实掉线）。
+    /// </summary>
+    private async Task RotateSessionAsync(ClientWebSocket target)
+    {
+        if (!ReferenceEquals(target, socket) || target.State != WebSocketState.Open)
+        {
+            return;
+        }
+
+        // 先置位再发帧：Close 帧一出去读循环就会退出，置位晚一步就会被当成异常掉线。
+        Interlocked.Exchange(ref rotationRequested, 1);
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            await target.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "session rotate", cts.Token);
+            _logger.LogDebug("[Control] 已发出轮换用 Close 帧，服务端会当场注销本会话");
+        }
+        catch (Exception ex)
+        {
+            // 链路正好在这一步断了，Close 帧发不出去：Abort 收场，读循环会当场退出。
+            // 口径仍按“计划内轮换”计（不给告警与退避添噪），服务端那边靠拆链报文或空闲超时兜底。
+            _logger.LogDebug(ex, "[Control] 轮换发送 Close 帧失败，直接 Abort 本条连接");
+            AbortQuietly(target);
+            return;
+        }
+
+        // CloseOutputAsync 只管把本端的 Close 帧发出去，不等对端回帧（要等就可能一直卡在这一步）。
+        // 但对端就是不回时，本端读循环不会退出，这次轮换等于没发生，最后还是被设备在会话上限那一刀砍掉 ——
+        // 那正是本功能要躲的东西。所以给 5 秒：状态没走到 Closed 就 Abort 收尾，读循环当场退出。
+        for (var i = 0; i < 10 && !IsClosed(target); i++)
+        {
+            await Task.Delay(500);
+        }
+
+        if (!IsClosed(target))
+        {
+            _logger.LogWarning("[Control] 轮换的 Close 帧已发出但 5 秒内没等到对端回帧，改 Abort 收尾（不让读循环一直挂在这一步）"
+                + "｜服务端那边靠拆链报文或 ClientIdleTimeoutSeconds 注销本会话");
+            AbortQuietly(target);
+        }
+    }
+
+    /// <summary>
+    /// 轮换收尾用的 Abort：失败也不另写一条日志（调用方已经把本轮的退出原因报了）。
+    /// </summary>
+    private void AbortQuietly(ClientWebSocket target)
+    {
+        try
+        {
+            target.Abort();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[Control] 轮换 Abort 失败");
+        }
+    }
+
+    /// <summary>
+    /// 关闭握手是否已经走完（或本端已不需要再等）。已 Dispose 的 WebSocket 读 State 会抛异常，
+    /// 这里一律当作“已关”：不能让一个收尾判断把轮换流程带倒。
+    /// CloseSent 不算已关（它恰好是“我发了 Close、还在等对端回帧”那个状态），
+    /// CloseReceived 则说明对端先说了再见，读循环本来就会退出。
+    /// </summary>
+    private static bool IsClosed(ClientWebSocket target)
+    {
+        try
+        {
+            return target.State == WebSocketState.Closed
+                || target.State == WebSocketState.Aborted
+                || target.State == WebSocketState.CloseReceived;
+        }
+        catch (ObjectDisposedException)
+        {
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+    }
+
     private async Task SendHeartbeatAsync()
     {
         if (Interlocked.CompareExchange(ref heartbeatPending, 1, 0) != 0)
@@ -620,6 +806,9 @@ public class FastTunnelClient : IFastTunnelClient
     {
         _logger.LogInformation("===== FastTunnel Client Stoping =====");
         StopHeartbeat();
+        // 轮换定时器也要在这里拆：停机流程自己会发 Close 帧，留着它就是在收工路上
+        // 再多一次“主动轮换”的计数与日志，把一个正常停机写成两条互斥的结束原因。
+        StopRotation();
 
         var current = socket;
         if (current == null)

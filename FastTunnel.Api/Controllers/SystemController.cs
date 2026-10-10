@@ -58,6 +58,8 @@ public class SystemController : BaseController
                 x.Key,
                 LocalIp = x.Value.First()?.WebConfig?.LocalIp,
                 LocalPort = x.Value.First()?.WebConfig?.LocalPort,
+                // 展示的是当前会被选中的那个后端的优先级（多台客户端挂同一站点时用它认主备）
+                Priority = x.Value.First()?.Priority,
                 Backends = x.Value.Count,
                 Alive = x.Value.Snapshot().Count(w => w.IsAlive),
                 Degraded = x.Value.Snapshot().Count(w => w.ConsecutiveTimeouts > 0)

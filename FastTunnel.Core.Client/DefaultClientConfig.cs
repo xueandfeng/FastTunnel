@@ -50,6 +50,25 @@ namespace FastTunnel.Core.Config
         public int ReconnectProbeIntervalSeconds { get; set; } = 2;
 
         /// <summary>
+        /// 会话主动轮换间隔（分钟），0 = 不轮换（默认）。
+        /// 开启后客户端每活过这么久就主动发 Close 帧重连一次。它用来躲中间设备的
+        /// “最长会话时长”硬上限（常见 7200 秒 = 2 小时）：那种上限不按流量重置，
+        /// 心跳调多密都挨同一刀；只能自己先到点把连接换掉，并把阈值配到上限之前留余量。
+        /// 多台客户端挂同一站点时不必人工错开取值，交给 <see cref="SessionRotateJitterSeconds"/>。
+        /// </summary>
+        public int MaxSessionMinutes { get; set; }
+
+        /// <summary>
+        /// 会话轮换的随机抖动上限（秒），0 = 不抖动。默认 0。
+        /// 每轮会话的实际轮换时刻 = MaxSessionMinutes 再加上 0~这么多个秒数的随机偏移（按秒取随机，
+        /// 不是按分钟，否则几台仍会撞在同一分钟上）。目的是让多台客户端的轮换时刻错开：
+        /// 若几台在同一刻一起换连接，会出现所有后端同时为空、站点短暂返回离线页。
+        /// 只在 MaxSessionMinutes &gt; 0 时生效；取值要留在设备上限之前的余量之内。
+        /// 代价是每台每次的断开时刻不可预测，看日志时以“会话轮换已排期”那条给的实际时刻为准。
+        /// </summary>
+        public int SessionRotateJitterSeconds { get; set; }
+
+        /// <summary>
         /// 连接前是否先 ICMP ping 一次服务端（仅排查网络用，会拖慢重连）。默认 false。
         /// </summary>
         public bool PingBeforeConnect { get; set; }

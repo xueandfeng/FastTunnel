@@ -65,10 +65,13 @@ namespace FastTunnel.Core.Models
 
         /// <summary>
         /// 可选后端顺序：控制通道仍为 Open 的才有资格。没被降级过的优先，
-        /// 同样健康时最后注册者优先（与旧版“后登录覆盖路由”的行为一致）。
+        /// 同样健康时按 Priority 从大到小（客户端没配就都是 0），优先级也相等时最后注册者优先
+        /// （与旧版“后登录覆盖路由”的行为一致）。
         /// 降级过的后端不摘除、只是排到最后：偶发慢握手不该把还在跑的后端打死，
         /// 只要它下一次建得上隧道就能凭 ResetTimeouts 回到队首。
-        /// 同时把已断开却没能走到注销流程的悬空条目摘掉，避免请求继续被送向死连接。
+        /// Priority 让位在 ConsecutiveTimeouts 之后是故意的：健康程度是事实，优先级是人的意见，
+        /// 不能让“我是主机”把一个正在连续降级失败的后端顶到健康那台前面去。
+        /// 同时把已断开却没能走到注销流程的悬空条目摘除，避免请求继续被送向死连接。
         /// </summary>
         public List<WebInfo> Candidates()
         {
@@ -76,6 +79,7 @@ namespace FastTunnel.Core.Models
             {
                 backends.RemoveAll(x => !x.IsAlive);
                 return backends.OrderBy(x => x.ConsecutiveTimeouts)
+                    .ThenByDescending(x => x.Priority)
                     .ThenByDescending(x => x.RegisteredUtc).ToList();
             }
         }
@@ -95,13 +99,15 @@ namespace FastTunnel.Core.Models
         }
 
         /// <summary>
-        /// 管理接口展示用的首个后端（可能已断开，仅用于展示配置）。
+        /// 管理接口展示用的首个后端（可能已断开，仅用于展示配置）。排序跟 Candidates 一致，
+        /// 不然面板上指的后端与实际接流量那个不是同一台，排障时会认错人。
         /// </summary>
         public WebInfo? First()
         {
             lock (gate)
             {
-                return backends.OrderByDescending(x => x.RegisteredUtc).FirstOrDefault();
+                return backends.OrderByDescending(x => x.Priority)
+                    .ThenByDescending(x => x.RegisteredUtc).FirstOrDefault();
             }
         }
 

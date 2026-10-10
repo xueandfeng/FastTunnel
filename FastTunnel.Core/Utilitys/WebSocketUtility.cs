@@ -18,6 +18,9 @@ namespace FastTunnel.Core.Utilitys
 
     public class WebSocketUtility
     {
+        /// <summary>EndReason 的初始值，表示读循环还在跑。</summary>
+        private const string RunningReason = "running";
+
         private readonly WebSocket webSocket;
 
         public WebSocketUtility(WebSocket webSocket, Action<ReadOnlySequence<byte>, CancellationToken> processLine)
@@ -31,7 +34,7 @@ namespace FastTunnel.Core.Utilitys
         /// <summary>
         /// 读循环退出的原因，用于定位“不定时重连”到底是谁先断的。
         /// </summary>
-        public string EndReason { get; private set; } = "running";
+        public string EndReason { get; private set; } = RunningReason;
 
         /// <summary>
         /// 读循环收到的未预期异常（网络错误、RST 等），无异常时为 null。
@@ -49,7 +52,25 @@ namespace FastTunnel.Core.Utilitys
             var writing = FillPipeAsync(webSocket, pipe.Writer, cancellationToken);
             var reading = ReadPipeAsync(pipe.Reader, cancellationToken);
 
-            await Task.WhenAll(reading, writing);
+            try
+            {
+                await Task.WhenAll(reading, writing);
+            }
+            catch (OperationCanceledException)
+            {
+                // 取消只可能来自调用方的令牌：服务端传的是 context.RequestAborted（对端拆链与
+                // 本进程停机都会触发它，两者在这里分不开，要靠调用方另判），客户端传的是宿主停机令牌。
+                //
+                // 这个异常以前会一路逃出 WhenAll —— ReadPipeAsync 里的 reader.ReadAsync(ct)
+                // 与 FillPipeAsync 里的 writer.FlushAsync(ct) 都没包 try。调用方写在
+                // ProcessLinesAsync 之后的会话摘要因此整条没机会执行，而最需要
+                // “退出原因 / 距上次入站”这两个字段的，恰恰是被外部拆链的那种场合。
+                // 现场表现就是服务端只剩一句“控制通道异常终止：OperationCanceledException”。
+                if (EndReason == RunningReason)
+                {
+                    EndReason = "读循环被取消(调用方令牌触发)";
+                }
+            }
         }
 
         /// <summary>
@@ -98,7 +119,9 @@ namespace FastTunnel.Core.Utilitys
                     }
                     catch (OperationCanceledException)
                     {
-                        EndReason = "本地取消(正在停止)";
+                        // 不要写成“正在停止”：服务端这条令牌在对端拆链时也会触发，
+                        // 按“停止”解读会把链路故障读成本机停机，排障方向整个反掉。
+                        EndReason = "读被取消(调用方令牌触发：对端拆链或本机停机)";
                         break;
                     }
                     catch (Exception ex)
@@ -133,29 +156,43 @@ namespace FastTunnel.Core.Utilitys
         /// <returns></returns>
         private async Task ReadPipeAsync(PipeReader reader, CancellationToken cancellationToken)
         {
-            while (true)
+            try
             {
-                var result = await reader.ReadAsync(cancellationToken);
-                var buffer = result.Buffer;
-
-                while (TryReadLine(ref buffer, out ReadOnlySequence<byte> line))
+                while (true)
                 {
-                    // Process the line.
-                    ProcessLine(line, cancellationToken);
-                }
+                    var result = await reader.ReadAsync(cancellationToken);
+                    var buffer = result.Buffer;
 
-                // Tell the PipeReader how much of the buffer has been consumed.
-                reader.AdvanceTo(buffer.Start, buffer.End);
+                    while (TryReadLine(ref buffer, out ReadOnlySequence<byte> line))
+                    {
+                        // Process the line.
+                        ProcessLine(line, cancellationToken);
+                    }
 
-                // Stop reading if there's no more data coming.
-                if (result.IsCompleted)
-                {
-                    break;
+                    // Tell the PipeReader how much of the buffer has been consumed.
+                    reader.AdvanceTo(buffer.Start, buffer.End);
+
+                    // Stop reading if there's no more data coming.
+                    if (result.IsCompleted)
+                    {
+                        break;
+                    }
                 }
             }
-
-            // Mark the PipeReader as complete.
-            await reader.CompleteAsync();
+            finally
+            {
+                // Mark the PipeReader as complete.
+                // 放在 finally 里：以前被取消时这一句会被跳过，Pipe 另一端的 writer 就得干等，
+                // 两条支路不能一起收尾。取消本身不是错误，不该让清理也跟着一起被跳过。
+                try
+                {
+                    await reader.CompleteAsync();
+                }
+                catch (Exception)
+                {
+                    // 重复 Complete 在 Pipe 已结束时不需要再处理，这里不能完全没兜底
+                }
+            }
         }
 
         bool TryReadLine(ref ReadOnlySequence<byte> buffer, out ReadOnlySequence<byte> line)
