@@ -45,7 +45,8 @@ services:
       # SELinux 为 enforcing 时行末加 :z（getenforce 查看）。宿主这个文件必须预先存在，
       # 否则 Docker 会在挂载点建一个同名目录，客户端读不到配置 —— fasttunnelclient.sh 先拦一道
       - ${FT_CONF_DIR:-/opt/conf/fasttunnel-client}/appsettings.Production.json:/app/appsettings.Production.json:ro
-      # Serilog 文件日志（按天滚动、保留 14 天），含启动引导日志 fasttunnel-client-boot-*.log
+      # Serilog 文件日志（按天滚动、保留 7 天，与 appsettings.json / Program.cs 里的天数一致），
+      # 含启动引导日志 fasttunnel-client-boot-*.log
       - ${FT_LOG_DIR:-/opt/logs/fasttunnel-client}:/app/logs
     logging:
       driver: json-file

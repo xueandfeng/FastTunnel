@@ -45,7 +45,8 @@ services:
       # 所以产物目录里没有它，fasttunnel.sh 会再核一道），必须手工放好。
       # SELinux 为 enforcing 时在这两行末尾加 :z（getenforce 查看）
       - /opt/conf/fasttunnel:/app/config
-      # Serilog 的文件日志（按天滚动、保留 30 天），容器重建不丢历史
+      # Serilog 的文件日志（按天滚动、保留 7 天，与 config/appsettings.json / Program.cs 里的天数一致），
+      # 容器重建不丢历史
       - /opt/logs/fasttunnel:/app/logs
     logging:
       driver: json-file

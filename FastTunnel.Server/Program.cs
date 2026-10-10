@@ -43,7 +43,9 @@ public class Program
                 .WriteTo.File(
                     "logs/fasttunnel-server-boot-.log",
                     rollingInterval: RollingInterval.Day,
-                    retainedFileCountLimit: 14,
+                    // 这里只管启动引导日志（config/appsettings.json 里的 Serilog 节管不到它）；
+                    // 天数要跟那里的 retainedFileCountLimit 保持一致，否则两类日志清理节奏不同。
+                    retainedFileCountLimit: 7,
                     outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
                 .CreateBootstrapLogger();
 
