@@ -201,7 +201,11 @@ namespace FastTunnel.Core.Handlers.Client
                 serverStream = sslStream;
             }
 
-            var reverse = $"PROXY /{requestId} HTTP/1.1\r\nHost: {cleint.Server.ServerAddr}:{cleint.Server.ServerPort}\r\n\r\n";
+            // Connection: close 是给服务端的 Kestrel 看的：这条 TCP 上不会再有第二个 PROXY
+            // 请求（每次 swap 都新拨一条，见调用方），声明清楚之后服务端处理完这条隧道就不会
+            // 再去“读下一个请求”，避免和隧道使用方残留的读并发（Concurrent reads or writes）。
+            // 隧道内部的 HTTP 语义由内网服务的响应决定，与这一行无关，复用行为不受影响。
+            var reverse = $"PROXY /{requestId} HTTP/1.1\r\nHost: {cleint.Server.ServerAddr}:{cleint.Server.ServerPort}\r\nConnection: close\r\n\r\n";
             var requestMsg = Encoding.UTF8.GetBytes(reverse);
             await serverStream.WriteAsync(requestMsg, cancellationToken);
             return serverStream;

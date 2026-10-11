@@ -22,6 +22,18 @@ namespace FastTunnel.Core.Forwarder.MiddleWare
         static int tunnelCount;
 
         /// <summary>
+        /// 隧道交还给 Kestrel 之前，最多再等多久让使用方（YARP 的连接、端口转发、UDP 会话）
+        /// 把读写彻底脱离这条连接的管道。
+        ///
+        /// 为什么必须等：<see cref="WebSocketStream"/> 的说明——中间件一返回，Kestrel 就可能
+        /// 在同一条连接上发起“读下一个请求”，而此时若还有读者挂在 Transport.Input 上，两者并发
+        /// 就抛 <c>Concurrent reads or writes are not supported.</c>，日志里对应
+        /// <c>Connection processing ended abnormally.</c>。等到“读写已脱离”再返回，这个并发窗口就不存在了。
+        /// 平时这一步是即刻完成的（使用方 Dispose 时读循环就会被叫醒），只有对端卡住才会走到超时。
+        /// </summary>
+        static readonly TimeSpan TunnelReleaseGrace = TimeSpan.FromSeconds(5);
+
+        /// <summary>
         /// 正在转发的访客 HTTP 请求数（走 YARP 那条非 PROXY 分支）。
         /// </summary>
         public static int RequestCount => requestCount;
@@ -108,28 +120,43 @@ namespace FastTunnel.Core.Forwarder.MiddleWare
                     return;
                 }
 
-                using var reverseConnection = new WebSocketStream(lifetime, transport);
-                responseAwaiter.Item1.TrySetResult(reverseConnection);
-
-                CancellationTokenSource cts;
-                if (responseAwaiter.Item2 != CancellationToken.None)
+                var reverseConnection = new WebSocketStream(lifetime, transport);
+                try
                 {
-                    cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.ConnectionClosed, responseAwaiter.Item2);
+                    if (!responseAwaiter.Item1.TrySetResult(reverseConnection)
+                        && !responseAwaiter.Item1.Task.IsCompletedSuccessfully)
+                    {
+                        // 无人接手：等这条隧道的请求已经取消/超时走了（proxyAsync 的 finally 会
+                        // TrySetCanceled），客户端此刻才把 PROXY 连接拨过来。孤儿隧道没有使用方，
+                        // 不能让它空挂在这条连接上，交给 finally 掐断。
+                        logger.LogDebug($"[PROXY]:无人接手 {requestId}（对应请求已离开），断开这条隧道");
+                        return;
+                    }
+
+                    using var cts = responseAwaiter.Item2 != CancellationToken.None
+                        ? CancellationTokenSource.CreateLinkedTokenSource(lifetime.ConnectionClosed, responseAwaiter.Item2)
+                        : CancellationTokenSource.CreateLinkedTokenSource(lifetime.ConnectionClosed);
+
+                    // 等的是“使用方已经把读写脱离管道”，不是只等取消信号——见 TunnelReleaseGrace。
+                    await reverseConnection.Released.WaitAsync(cts.Token);
+                    logger.LogDebug($"[PROXY]:Closed {requestId}");
                 }
-                else
+                catch (OperationCanceledException)
                 {
-                    cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.ConnectionClosed);
+                    // 访客取消 / 隧道被拆：正常的收尾路径，不算故障
+                    logger.LogDebug($"[PROXY]:Cancel {requestId}");
                 }
-
-                var closedAwaiter = new TaskCompletionSource<object>();
-
-                //lifetime.ConnectionClosed.Register((task) =>
-                //{
-                //    (task as TaskCompletionSource<object>).SetResult(null);
-                //}, closedAwaiter);
-
-                await closedAwaiter.Task.WaitAsync(cts.Token);
-                logger.LogDebug($"[PROXY]:Closed {requestId}");
+                finally
+                {
+                    // 不管从哪个分支出去（正常释放、取消、无人接手），都要在把连接交回 Kestrel
+                    // 之前确认读写已脱离管道；等不到就记一条日志——Abort 已经发出去，这条连接会被
+                    // Kestrel 直接拆掉，不会再有“读下一个请求”的机会。
+                    if (!await reverseConnection.ShutdownAsync(TunnelReleaseGrace))
+                    {
+                        logger.LogWarning($"[PROXY]:隧道 {requestId} 在 {(int)TunnelReleaseGrace.TotalSeconds} 秒内"
+                            + "仍未脱离连接管道（使用方还占着读写），已强制断开这条连接");
+                    }
+                }
             }
             catch (TaskCanceledException) { }
             catch (Exception ex)
